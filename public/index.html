@@ -1,0 +1,51 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediMind AI</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>✚ MediMind AI</h1>
+    <p>Your Medical and Study Assistant</p>
+  </header>
+
+  <main>
+    <section class="welcome">
+      <h2>Welcome to MediMind AI</h2>
+      <p>Learn about health, medicine and education.</p>
+    </section>
+
+    <section class="modes">
+      <button onclick="setMode('medical')">
+        Medical Assistant
+      </button>
+
+      <button onclick="setMode('study')">
+        Study Assistant
+      </button>
+    </section>
+
+    <div id="chat">
+      <div id="messages"></div>
+    </div>
+
+    <form id="chatForm">
+      <textarea id="question"
+        placeholder="Ask MediMind AI anything..."
+        required></textarea>
+
+      <button type="submit">Send ↑</button>
+    </form>
+
+    <p class="notice">
+      Medical education only. Not a replacement
+      for qualified healthcare professionals.
+    </p>
+  </main>
+</body>
+</html>
