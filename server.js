@@ -1,145 +1,314 @@
 
-import "dotenv/config";
-import express from "express";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+/*
+  MEDIMIND AI
+  Backend server
+  AI Provider: Groq
+  Model: OpenAI GPT-OSS 120B
+*/
+
+require("dotenv").config();
+
+const express = require("express");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const Groq = require("groq-sdk");
+
+// ------------------------------------
+// APP CONFIGURATION
+// ------------------------------------
 
 const app = express();
 
+const PORT = process.env.PORT || 3000;
+
+const MODEL = "openai/gpt-oss-120b";
+
+// ------------------------------------
+// GROQ CONFIGURATION
+// ------------------------------------
+
+if (!process.env.GROQ_API_KEY) {
+  console.error("ERROR: GROQ_API_KEY is missing from .env");
+  process.exit(1);
+}
+
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
+});
+
+// ------------------------------------
+// SECURITY MIDDLEWARE
+// ------------------------------------
+
 app.use(helmet());
-app.use(express.json({ limit: "40kb" }));
+
+app.use(express.json({
+  limit: "1mb"
+}));
+
 app.use(express.static("public"));
 
-const limiter = rateLimit({
-  windowMs: 60000,
-  limit: 12
+app.use("/api/", rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: {
+    error: "Too many requests. Please try again shortly."
+  }
+}));
+
+// ------------------------------------
+// MEDIMIND AI SYSTEM PROMPTS
+// ------------------------------------
+
+const prompts = {
+
+  medical: `
+You are MediMind AI, an advanced medical education assistant.
+
+Your responsibilities:
+
+1. Explain medical and health science topics.
+2. Explain diseases, anatomy, physiology and medical terminology for educational purposes.
+3. Help users understand general medical information.
+4. Explain medical research in simple language.
+5. Help users prepare questions for qualified healthcare professionals.
+6. Be accurate, clear, respectful and responsible.
+
+IMPORTANT SAFETY RULES:
+
+- You are an educational AI, not a doctor.
+- Do not diagnose users.
+- Do not prescribe medication or recommend personal treatment plans.
+- Do not claim certainty when information is uncertain.
+- Encourage users to speak with qualified healthcare professionals about personal medical concerns.
+- For possible emergencies, advise contacting local emergency services or visiting the nearest emergency department.
+- Do not request unnecessary personal or identifying medical information.
+- Protect user privacy.
+
+Always make your explanations easy to understand.
+`,
+
+  study: `
+You are MediMind AI Study Assistant.
+
+Your job is to help students learn medical and science subjects.
+
+You can:
+
+1. Explain difficult topics step by step.
+2. Explain anatomy and physiology.
+3. Explain biology, chemistry and medicine.
+4. Create educational summaries.
+5. Help students understand scientific concepts.
+6. Give examples and analogies.
+7. Help with revision and learning.
+8. Explain answers clearly.
+
+Use simple language when appropriate.
+Be encouraging, accurate and educational.
+`
+};
+
+// ------------------------------------
+// HOME ROUTE
+// ------------------------------------
+
+app.get("/", (req, res) => {
+  res.sendFile(
+    require("path").join(__dirname, "public", "index.html")
+  );
 });
 
-const medicalInstructions = `
-You are MediMind AI, an educational medical assistant.
-
-Explain health information in simple language.
-Never claim to diagnose a patient.
-Never prescribe medication or individualized doses.
-Explain uncertainty.
-Encourage professional medical care.
-For emergencies, direct users to emergency services.
-Protect personal health information.
-`;
-
-const studyInstructions = `
-You are MediMind AI, an advanced study tutor.
-
-Teach mathematics, biology, chemistry,
-physics and other subjects.
-
-Explain difficult concepts step by step.
-Give examples and practice questions.
-Help students understand their lessons.
-`;
+// ------------------------------------
+// API STATUS ROUTE
+// ------------------------------------
 
 app.get("/api/status", (req, res) => {
+
   res.json({
-    ok: true,
-    aiConfigured: Boolean(process.env.OPENAI_API_KEY)
+    success: true,
+    app: "MediMind AI",
+    status: "online",
+    provider: "Groq",
+    model: MODEL
   });
+
 });
 
-app.post("/api/chat", limiter, async (req, res) => {
-  try {
-    const { mode, messages } = req.body;
+// ------------------------------------
+// CHAT API
+// ------------------------------------
 
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(503).json({
-        error: "AI API key is not configured."
-      });
-    }
+app.post("/api/chat", async (req, res) => {
+
+  try {
+
+    const {
+      mode = "medical",
+      messages
+    } = req.body || {};
+
+    // Validate mode
 
     if (!["medical", "study"].includes(mode)) {
+
       return res.status(400).json({
-        error: "Invalid assistant mode."
+        success: false,
+        error: "Invalid chat mode."
       });
+
     }
 
-    if (!Array.isArray(messages) ||
-        messages.length < 1 ||
-        messages.length > 12) {
+    // Validate messages
+
+    if (
+      !Array.isArray(messages) ||
+      messages.length === 0 ||
+      messages.length > 30
+    ) {
+
       return res.status(400).json({
-        error: "Invalid messages."
+        success: false,
+        error: "Please provide a valid conversation."
       });
+
     }
 
-    const validMessages = messages.map(message => {
+    // Validate each message
+
+    for (const message of messages) {
+
       if (
         !message ||
         !["user", "assistant"].includes(message.role) ||
         typeof message.content !== "string" ||
-        !message.content.trim() ||
-        message.content.length > 4000
+        message.content.trim().length === 0 ||
+        message.content.length > 10000
       ) {
-        throw new Error("Invalid message.");
+
+        return res.status(400).json({
+          success: false,
+          error: "Invalid message format."
+        });
+
       }
 
-      return {
-        role: message.role,
-        content: message.content.trim()
-      };
-    });
-
-    const instructions =
-      mode === "medical"
-        ? medicalInstructions
-        : studyInstructions;
-
-    const response = await fetch(
-      "https://api.openai.com/v1/responses",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization":
-            `Bearer ${process.env.OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: process.env.OPENAI_MODEL || "gpt-5.5",
-          instructions,
-          input: validMessages,
-          max_output_tokens: 1200
-        }),
-        signal: AbortSignal.timeout(60000)
-      }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error(data.error);
-      return res.status(502).json({
-        error: "AI service request failed."
-      });
     }
 
-    const answer = (data.output || [])
-      .flatMap(item => item.content || [])
-      .filter(item => item.type === "output_text")
-      .map(item => item.text)
-      .join("\n");
+    // Keep the API input within a reasonable limit
 
-    res.json({ answer });
+    const conversation = messages.map(message => ({
+      role: message.role,
+      content: message.content
+    }));
+
+    // Send request to Groq
+
+    const completion =
+      await groq.chat.completions.create({
+
+        model: MODEL,
+
+        messages: [
+          {
+            role: "system",
+            content: prompts[mode]
+          },
+          ...conversation
+        ],
+
+        temperature: 0.5,
+
+        max_completion_tokens: 1200
+
+      });
+
+    // Get AI response
+
+    const answer =
+      completion.choices?.[0]?.message?.content ||
+      "Sorry, I couldn't generate a response. Please try again.";
+
+    // Return response to frontend
+
+    return res.json({
+
+      success: true,
+      model: MODEL,
+      answer
+
+    });
 
   } catch (error) {
-    console.error(error);
 
-    res.status(500).json({
-      error: "Something went wrong."
+    console.error(
+      "MediMind AI Error:",
+      error.message
+    );
+
+    return res.status(500).json({
+
+      success: false,
+      error: "MediMind AI is temporarily unavailable. Please try again."
+
     });
+
   }
+
 });
 
-const PORT = process.env.PORT || 3000;
+// ------------------------------------
+// 404 API HANDLER
+// ------------------------------------
+
+app.use("/api", (req, res) => {
+
+  res.status(404).json({
+
+    success: false,
+    error: "API endpoint not found."
+
+  });
+
+});
+
+// ------------------------------------
+// GENERAL ERROR HANDLER
+// ------------------------------------
+
+app.use((err, req, res, next) => {
+
+  console.error("Server error:", err.message);
+
+  res.status(500).json({
+
+    success: false,
+    error: "An unexpected server error occurred."
+
+  });
+
+});
+
+// ------------------------------------
+// START SERVER
+// ------------------------------------
 
 app.listen(PORT, () => {
+
+  console.log("--------------------------------");
+  console.log("       MEDIMIND AI SERVER       ");
+  console.log("--------------------------------");
+
+  console.log("Status: ONLINE");
+  console.log("Provider: GROQ");
+  console.log("Model:", MODEL);
+
   console.log(
-    `MediMind AI running at http://localhost:${PORT}`
+    `Website: http://localhost:${PORT}`
   );
+
+  console.log("--------------------------------");
+
 });
